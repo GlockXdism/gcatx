@@ -1,363 +1,56 @@
--- Gcat HUB (모바일/터치 대응 + 키보드/갯수 안정화 개선판)
-local TweenService = game:GetService("TweenService")
+getgenv().MailboxConfig = {
+    MAIL_USERNAME = { "" },
+    MAIL_ITEM_NAME = { 
+        [""] = 0,
+    },
+    MAIL_NOTE = "",
+    SEND_INTERVAL = 600,
+    AUTO_SEND = false,
+}
+
+local C = getgenv().MailboxConfig or {}
+local RS = game:GetService("ReplicatedStorage")
+local Net = require(RS:WaitForChild("SharedModules"):WaitForChild("Networking"))
+local PS = require(RS:WaitForChild("ClientModules"):WaitForChild("PlayerStateClient"))
+local UIS = game:GetService("UserInputService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
 
-local LocalPlayer = Players.LocalPlayer
+local STACK = {
+    Sprinklers = 1, WateringCans = 1, Mushrooms = 1, Gnomes = 1, Raccoons = 1, Crates = 1,
+    SeedPacks = 1, Trowels = 1, Props = 1, Seeds = 1, HarvestedFruits = 1, Flashbangs = 1, EmptyPots = 1,
+}
 
-pcall(function()
-    if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild("GcatHubScreen") then
-        LocalPlayer.PlayerGui.GcatHubScreen:Destroy()
-    end
-end)
+local GUI_STATE = {
+    isVisible = true,
+    autoSendActive = false,
+    statusMessage = "준비됨",
+}
 
-local GcatHubScreen = Instance.new("ScreenGui")
-GcatHubScreen.Name = "GcatHubScreen"
-GcatHubScreen.ResetOnSpawn = false
-GcatHubScreen.IgnoreGuiInset = true
-GcatHubScreen.Parent = (LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui")) or game:GetService("CoreGui")
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0.92, 0, 0.82, 0)
-MainFrame.Position = UDim2.new(0.04, 0, 0.06, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Parent = GcatHubScreen
-
-local MainCorner = Instance.new("UICorner"); MainCorner.CornerRadius = UDim.new(0, 12); MainCorner.Parent = MainFrame
-local UIStroke = Instance.new("UIStroke"); UIStroke.Color = Color3.fromRGB(0, 160, 255); UIStroke.Thickness = 1.5; UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; UIStroke.Parent = MainFrame
-
-local TitleText = Instance.new("TextLabel")
-TitleText.Size = UDim2.new(1, -50, 0, 45)
-TitleText.Position = UDim2.new(0, 18, 0, 0)
-TitleText.BackgroundTransparency = 1
-TitleText.Text = "🐱 Gcat HUB v2.0"
-TitleText.TextColor3 = Color3.fromRGB(0, 180, 255)
-TitleText.TextSize = 18
-TitleText.Font = Enum.Font.GothamBold
-TitleText.TextXAlignment = Enum.TextXAlignment.Left
-TitleText.Parent = MainFrame
-
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 24, 0, 24)
-CloseBtn.Position = UDim2.new(1, -38, 0, 11)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(240, 70, 70)
-CloseBtn.Text = "×"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.TextSize = 16
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.Parent = MainFrame
-CloseBtn.MouseButton1Click:Connect(function() GcatHubScreen:Destroy() end)
-
-local LeftPanel = Instance.new("Frame")
-LeftPanel.Size = UDim2.new(0, 230, 1, -60)
-LeftPanel.Position = UDim2.new(0, 18, 0, 45)
-LeftPanel.BackgroundTransparency = 1
-LeftPanel.Parent = MainFrame
-
-local function createCustomInput(placeholder, yPos, parent)
-    local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, 0, 0, 36)
-    box.Position = UDim2.new(0, 0, 0, yPos)
-    box.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    box.BorderSizePixel = 0
-    box.PlaceholderText = placeholder
-    box.PlaceholderColor3 = Color3.fromRGB(100, 100, 110)
-    box.Text = ""
-    box.TextColor3 = Color3.fromRGB(255, 255, 255)
-    box.TextSize = 13
-    box.Font = Enum.Font.Gotham
-    box.ClearTextOnFocus = false
-    box.Parent = parent
-
-    local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = box
-    local s = Instance.new("UIStroke"); s.Color = Color3.fromRGB(45, 45, 55); s.Thickness = 1; s.Parent = box
-
-    box.Focused:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.2), {Color = Color3.fromRGB(0, 140, 255)}):Play()
-    end)
-    box.FocusLost:Connect(function()
-        TweenService:Create(s, TweenInfo.new(0.2), {Color = Color3.fromRGB(45, 45, 55)}):Play()
-    end)
-
-    return box
+local function getInv()
+    local ok, r = pcall(function() return PS:WaitForLocalReplica(5) end)
+    return ok and r and r.Data and type(r.Data.Inventory) == "table" and r.Data.Inventory
 end
 
-local InputUser = createCustomInput("받을 사람 닉네임 입력", 0, LeftPanel)
-local InputNote = createCustomInput("우편 메시지 (생략 가능)", 45, LeftPanel)
-
-local LogFrame = Instance.new("ScrollingFrame")
-LogFrame.Size = UDim2.new(1, 0, 0, 240)
-LogFrame.Position = UDim2.new(0, 0, 0, 95)
-LogFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-LogFrame.BorderSizePixel = 0
-LogFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-LogFrame.ScrollBarThickness = 2
-LogFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 160, 255)
-LogFrame.Parent = LeftPanel
-
-local LogCorner = Instance.new("UICorner"); LogCorner.CornerRadius = UDim.new(0, 6); LogCorner.Parent = LogFrame
-local LogListLayout = Instance.new("UIListLayout"); LogListLayout.Padding = UDim.new(0, 4); LogListLayout.SortOrder = Enum.SortOrder.LayoutOrder; LogListLayout.Parent = LogFrame
-
-local function appendLog(text, isError)
-    local logText = Instance.new("TextLabel")
-    logText.Size = UDim2.new(1, -10, 0, 18)
-    logText.BackgroundTransparency = 1
-    logText.Text = " [" .. os.date("%X") .. "] " .. text
-    logText.TextColor3 = isError and Color3.fromRGB(255, 90, 90) or Color3.fromRGB(130, 220, 130)
-    logText.TextSize = 11
-    logText.Font = Enum.Font.Code
-    logText.TextXAlignment = Enum.TextXAlignment.Left
-    logText.Parent = LogFrame
-
-    -- 안정적으로 스크롤 위치 맞추기
-    RunService.Heartbeat:Wait()
-    LogFrame.CanvasSize = UDim2.new(0, 0, 0, LogListLayout.AbsoluteContentSize.Y + 10)
-    LogFrame.CanvasPosition = Vector2.new(0, math.max(0, LogListLayout.AbsoluteContentSize.Y - LogFrame.AbsoluteSize.Y))
-end
-
-local RightPanel = Instance.new("Frame")
-RightPanel.Size = UDim2.new(0, 236, 1, -60)
-RightPanel.Position = UDim2.new(1, -254, 0, 45)
-RightPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-RightPanel.BorderSizePixel = 0
-RightPanel.Parent = MainFrame
-
-local RightCorner = Instance.new("UICorner"); RightCorner.CornerRadius = UDim.new(0, 8); RightCorner.Parent = RightPanel
-
-local CatalogLabel = Instance.new("TextLabel")
-CatalogLabel.Size = UDim2.new(1, 0, 0, 28)
-CatalogLabel.BackgroundTransparency = 1
-CatalogLabel.Text = "📦 터치 시 수량 입력 (장바구니)"
-CatalogLabel.TextColor3 = Color3.fromRGB(160, 160, 170)
-CatalogLabel.TextSize = 12
-CatalogLabel.Font = Enum.Font.GothamBold
-CatalogLabel.Parent = RightPanel
-
-local CatalogScroll = Instance.new("ScrollingFrame")
-CatalogScroll.Size = UDim2.new(1, -12, 1, -34)
-CatalogScroll.Position = UDim2.new(0, 6, 0, 28)
-CatalogScroll.BackgroundTransparency = 1
-CatalogScroll.BorderSizePixel = 0
-CatalogScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-CatalogScroll.ScrollBarThickness = 3
-CatalogScroll.ScrollBarImageColor3 = Color3.fromRGB(0, 160, 255)
-CatalogScroll.Parent = RightPanel
-
-local Grid = Instance.new("UIGridLayout")
-Grid.CellSize = UDim2.new(0, 106, 0, 40)
-Grid.CellPadding = UDim2.new(0, 6, 0, 6)
-Grid.SortOrder = Enum.SortOrder.LayoutOrder
-Grid.Parent = CatalogScroll
-
--- 캔버스 사이즈를 레이아웃 변경에 따라 즉시 업데이트
-Grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    CatalogScroll.CanvasSize = UDim2.new(0, 0, 0, Grid.AbsoluteContentSize.Y + 10)
-end)
-
-local PromptFrame = Instance.new("Frame")
-PromptFrame.Size = UDim2.new(0, 200, 0, 110)
-PromptFrame.AnchorPoint = Vector2.new(0.5, 0) -- 가운데 기준
-PromptFrame.Position = UDim2.new(0.5, 0, 0.4, 0)
-PromptFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-PromptFrame.Visible = false
-PromptFrame.ZIndex = 10
-PromptFrame.Parent = MainFrame
-
-local originalPromptPos = PromptFrame.Position
-
-local pc = Instance.new("UICorner"); pc.CornerRadius = UDim.new(0, 6); pc.Parent = PromptFrame
-local ps = Instance.new("UIStroke"); ps.Color = Color3.fromRGB(0, 140, 255); ps.Parent = PromptFrame
-
-local PromptTitle = Instance.new("TextLabel")
-PromptTitle.Size = UDim2.new(1, 0, 0, 25)
-PromptTitle.BackgroundTransparency = 1
-PromptTitle.Text = "수량 지정 입력"
-PromptTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-PromptTitle.TextSize = 11
-PromptTitle.Font = Enum.Font.GothamBold
-PromptTitle.Parent = PromptFrame
-
-local PromptInput = Instance.new("TextBox")
-PromptInput.Size = UDim2.new(1, -20, 0, 28)
-PromptInput.Position = UDim2.new(0, 10, 0, 30)
-PromptInput.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-PromptInput.Text = ""
-PromptInput.PlaceholderText = "개수 적기"
-PromptInput.TextColor3 = Color3.fromRGB(255, 255, 255)
-PromptInput.TextSize = 11
-PromptInput.ClearTextOnFocus = true
-PromptInput.Parent = PromptFrame
-
-local pic = Instance.new("UICorner"); pic.CornerRadius = UDim.new(0, 4); pic.Parent = PromptInput
-
-local PromptOk = Instance.new("TextButton")
-PromptOk.Size = UDim2.new(0, 85, 0, 26)
-PromptOk.Position = UDim2.new(0, 10, 0, 70)
-PromptOk.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
-PromptOk.Text = "확인"
-PromptOk.TextColor3 = Color3.fromRGB(255, 255, 255)
-PromptOk.TextSize = 11
-PromptOk.Font = Enum.Font.GothamBold
-PromptOk.Parent = PromptFrame
-
-local PromptCancel = Instance.new("TextButton")
-PromptCancel.Size = UDim2.new(0, 85, 0, 26)
-PromptCancel.Position = UDim2.new(1, -95, 0, 70)
-PromptCancel.BackgroundColor3 = Color3.fromRGB(70, 70, 75)
-PromptCancel.Text = "취소"
-PromptCancel.TextColor3 = Color3.fromRGB(255, 255, 255)
-PromptCancel.TextSize = 11
-PromptCancel.Font = Enum.Font.GothamBold
-PromptCancel.Parent = PromptFrame
-
--- 네트워킹/인벤토리 모듈 로드
-local Networking = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("Networking"))
-local PlayerStateClient = require(ReplicatedStorage:WaitForChild("ClientModules"):WaitForChild("PlayerStateClient"))
-
-local CATEGORIES = {"Seeds", "Sprinklers", "WateringCans", "Trowels", "Mushrooms", "Raccoons", "Gnomes", "HarvestedFruits", "Pets"}
-local basket = {}
-local activeTargetItem = nil
-
-local function getInventory()
-    local replica = PlayerStateClient:GetLocalReplica()
-    return replica and replica.Data and replica.Data.Inventory
-end
-
--- 장바구니 상태 검증: 인벤토리와 대조해 사라진 아이템 제거
-local function sanitizeBasket(inv)
-    local removed = false
-    for name, info in pairs(basket) do
-        local found = false
-        local cat = info.Category
-        local bkt = inv and inv[cat]
-        if type(bkt) == "table" then
-            for k, v in pairs(bkt) do
-                local itemName = tostring(k)
-                if itemName == name or (type(v) == "table" and (v.Name == name)) then
-                    local has = type(v) == "number" and v or (type(v) == "table" and v.Count or 1)
-                    if has > 0 then found = true; break end
+local function buildBatch(inv, items)
+    local out, max = {}, 20
+    for name, amt in items do
+        if #out >= max then break end
+        local want = math.max(1, math.floor(tonumber(amt) or 1))
+        if type(inv.Pets) == "table" then
+            for key, p in inv.Pets do
+                if want <= 0 or #out >= max then break end
+                if type(p) == "table" and p.Id and not p.Equipped and tostring(p.Name) == name then
+                    out[#out + 1] = { Category = "Pets", ItemKey = key, Count = 1 }
+                    want -= 1
                 end
             end
         end
-        if not found then
-            basket[name] = nil
-            removed = true
-            appendLog("장바구니에서 사라짐: " .. name, true)
-        end
-    end
-    return removed
-end
-
-local function refreshCatalogUi()
-    for _, child in pairs(CatalogScroll:GetChildren()) do
-        if child:IsA("TextButton") then child:Destroy() end
-    end
-    local inv = getInventory()
-    if not inv then return end
-
-    -- 장바구니 검증(인벤토리 기준)
-    sanitizeBasket(inv)
-
-    for _, cat in pairs(CATEGORIES) do
-        local bucketData = inv[cat]
-        if type(bucketData) == "table" then
-            for key, entry in pairs(bucketData) do
-                local name = tostring(key)
-                local count = 0
-                if cat == "Pets" and type(entry) == "table" then
-                    name = entry.Name or entry.Species or name
-                    count = 1
-                elseif cat == "HarvestedFruits" and type(entry) == "table" then
-                    name = entry.Name or name
-                    count = entry.Count or 1
-                elseif type(entry) == "number" then
-                    count = entry
-                end
-
-                if count > 0 then
-                    local itemBtn = Instance.new("TextButton")
-                    itemBtn.BackgroundColor3 = basket[name] and Color3.fromRGB(0, 120, 220) or Color3.fromRGB(30, 30, 36)
-                    itemBtn.Text = basket[name] and name .. "\n(지정: " .. tostring(basket[name].WantCount) .. "개)" or name .. "\n(" .. tostring(count) .. "개)"
-                    itemBtn.TextColor3 = basket[name] and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(220, 220, 230)
-                    itemBtn.TextSize = 11
-                    itemBtn.Font = Enum.Font.Gotham
-                    itemBtn.Parent = CatalogScroll
-                    local bc = Instance.new("UICorner"); bc.CornerRadius = UDim.new(0, 4); bc.Parent = itemBtn
-
-                    itemBtn.MouseButton1Click:Connect(function()
-                        if basket[name] then
-                            basket[name] = nil
-                            itemBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
-                            itemBtn.TextColor3 = Color3.fromRGB(220, 220, 230)
-                            itemBtn.Text = name .. "\n(" .. tostring(count) .. "개)"
-                            appendLog("바구니 해제: " .. name, true)
-                        else
-                            activeTargetItem = {Name = name, Category = cat, ItemKey = key, Max = count, Btn = itemBtn}
-                            PromptTitle.Text = name .. " (최대 " .. count .. "개)"
-                            PromptInput.Text = tostring(count)
-                            PromptFrame.Visible = true
-                            PromptInput:CaptureFocus()
-                        end
-                    end)
-                end
-            end
-        end
-    end
-
-    -- 레이아웃 업데이트 보장
-    RunService.Heartbeat:Wait()
-    CatalogScroll.CanvasSize = UDim2.new(0, 0, 0, Grid.AbsoluteContentSize.Y + 10)
-end
-
-PromptOk.MouseButton1Click:Connect(function()
-    if activeTargetItem then
-        local amt = math.floor(tonumber(PromptInput.Text) or 0)
-        if amt <= 0 then amt = 1 end
-        amt = math.min(amt, activeTargetItem.Max)
-        basket[activeTargetItem.Name] = {Category = activeTargetItem.Category, ItemKey = activeTargetItem.ItemKey, WantCount = amt}
-        activeTargetItem.Btn.BackgroundColor3 = Color3.fromRGB(0, 120, 220)
-        activeTargetItem.Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        activeTargetItem.Btn.Text = activeTargetItem.Name .. "\n(지정: " .. tostring(amt) .. "개)"
-        appendLog(activeTargetItem.Name .. " -> " .. amt .. "개 장바구니 담기 완료", false)
-    end
-    PromptFrame.Visible = false
-    activeTargetItem = nil
-    -- 갱신하여 UI와 장바구니 일치화
-    task.delay(0.1, refreshCatalogUi)
-end)
-
-PromptCancel.MouseButton1Click:Connect(function()
-    PromptFrame.Visible = false
-    activeTargetItem = nil
-end)
-
-local function buildMultiSpecifiedBatch(inv)
-    local out = {}
-    local max_slots = 20
-    for name, info in pairs(basket) do
-        if #out >= max_slots then break end
-        local cat = info.Category
-        local bkt = inv[cat]
-        if type(bkt) == "table" then
-            for k, v in pairs(bkt) do
-                if #out >= max_slots then break end
-                if tostring(k) == name or (type(v) == "table" and v.Name == name) then
-                    local has = type(v) == "number" and v or (type(v) == "table" and v.Count or 1)
-                    if has > 0 then
-                        local finalWant = math.min(info.WantCount, has)
-                        local remaining = finalWant
-                        while remaining > 0 and #out < max_slots do
-                            local sendAmt = math.min(remaining, 9999)
-                            table.insert(out, { Category = cat, ItemKey = k, Count = sendAmt })
-                            remaining = remaining - sendAmt
-                        end
-                        break
-                    end
+        if want > 0 then
+            for cat in STACK do
+                local t = inv[cat]
+                if type(t) == "table" and type(t[name]) == "number" and t[name] > 0 then
+                    out[#out + 1] = { Category = cat, ItemKey = name, Count = math.min(want, t[name]) }
+                    break
                 end
             end
         end
@@ -365,123 +58,445 @@ local function buildMultiSpecifiedBatch(inv)
     return out
 end
 
-local sending = false
-local function sendMultiMail()
-    if sending then return end
-    sending = true
-    local target = InputUser.Text
-    local note = InputNote.Text
-    if not target or target == "" then appendLog("닉네임을 입력해 주세요.", true); sending = false; return end
-    if LocalPlayer and target == LocalPlayer.Name then appendLog("자기 자신에게 보낼 수 없습니다.", true); sending = false; return end
+getgenv().mailboxSendOnce = function()
+    local users, items = C.MAIL_USERNAME or {}, C.MAIL_ITEM_NAME or {}
+    if #users == 0 or not next(items) then 
+        GUI_STATE.statusMessage = "❌ 설정 오류"
+        return warn("[Mailbox] empty config") 
+    end
+    local inv = getInv()
+    if not inv then 
+        GUI_STATE.statusMessage = "❌ 인벤토리 오류"
+        return warn("[Mailbox] no inventory") 
+    end
+    local batch = buildBatch(inv, items)
+    if #batch == 0 then 
+        GUI_STATE.statusMessage = "❌ 보낼 아이템 없음"
+        return warn("[Mailbox] nothing to send") 
+    end
+    local target = tostring(users[math.random(#users)])
+    local ok, uid, err = pcall(function() return Net.Mailbox.LookupPlayer:Fire(target) end)
+    if not ok or type(uid) ~= "number" or uid <= 0 then 
+        GUI_STATE.statusMessage = "❌ 플레이어 찾기 실패"
+        return warn("[Mailbox] lookup:", err) 
+    end
+    ok = pcall(function()
+        Net.Mailbox.SendBatch:Fire(uid, batch, C.MAIL_NOTE or "")
+    end)
+    
+    if ok then
+        GUI_STATE.statusMessage = "✅ 전송 완료: " .. target
+        print("[Mailbox] sent to " .. target)
+        return true
+    else
+        GUI_STATE.statusMessage = "❌ 전송 실패"
+        print("[Mailbox] send failed")
+        return false
+    end
+end
 
-    local countItems = 0
-    for _ in pairs(basket) do countItems = countItems + 1 end
-    if countItems == 0 then appendLog("선택된 아이템이 없습니다.", true); sending = false; return end
-
-    local inv = getInventory()
-    if not inv then appendLog("인벤토리 로드 실패.", true); sending = false; return end
-
-    -- 전송 직전 인벤토리 재검사 및 장바구니 정리
-    sanitizeBasket(inv)
-    local batch = buildMultiSpecifiedBatch(inv)
-    if #batch == 0 then appendLog("보낼 수 있는 수량이 없습니다.", true); sending = false; return end
-
-    appendLog("대상 조회 중: " .. target, false)
-
-    -- 버튼 상태 표시
-    SendBtn.Active = false
-    local oldText = SendBtn.Text
-    SendBtn.Text = "SENDING..."
-
-    local ok, uid = pcall(function() return Networking.Mailbox.LookupPlayer:Fire(target) end)
-    if not ok or type(uid) ~= "number" or uid <= 0 then
-        appendLog("플레이어를 찾을 수 없습니다.", true)
-        SendBtn.Text = oldText
-        SendBtn.Active = true
-        sending = false
+local function createGUI()
+    local player = Players.LocalPlayer
+    if not player then
+        warn("[Mailbox] No local player found")
         return
     end
-
-    appendLog("🔮 보내기완료...", false)
-    local ok2, success, msg = pcall(function() return Networking.Mailbox.SendBatch:Fire(uid, batch, note) end)
-    if success == true then
-        appendLog("✅ 일괄 전송 완료 -> " .. target, false)
-        table.clear(basket)
-        task.delay(1, refreshCatalogUi)
-    else
-        appendLog("❌ 실패: " .. tostring(msg or success), true)
+    
+    local playerGui = player:WaitForChild("PlayerGui")
+    
+    -- 기존 GUI 제거
+    local existingGui = playerGui:FindFirstChild("MailboxGUI")
+    if existingGui then
+        existingGui:Destroy()
     end
-
-    SendBtn.Text = oldText
-    SendBtn.Active = true
-    sending = false
-end
-
-local SendBtn = Instance.new("TextButton")
-SendBtn.Size = UDim2.new(1, -36, 0, 42)
-SendBtn.Position = UDim2.new(0, 18, 0, 415)
-SendBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 255)
-SendBtn.Text = "SEND MAIL"
-SendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-SendBtn.TextSize = 14
-SendBtn.Font = Enum.Font.GothamBold
-SendBtn.Parent = MainFrame
-SendBtn.MouseEnter:Connect(function() TweenService:Create(SendBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 170, 255)}):Play() end)
-SendBtn.MouseLeave:Connect(function() TweenService:Create(SendBtn, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 140, 255)}):Play() end)
-SendBtn.MouseButton1Click:Connect(function() sendMultiMail() end)
-
--- 모바일/터치와 마우스 모두 지원하는 드래그 구현
-do
-    local dragging = false
-    local dragStart = nil
-    local startAbsPos = nil
-
-    MainFrame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startAbsPos = MainFrame.AbsolutePosition
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
+    
+    -- 메인 화면
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "MailboxGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Enabled = true
+    screenGui.Parent = playerGui
+    
+    -- 메인 컨테이너
+    local mainContainer = Instance.new("Frame")
+    mainContainer.Name = "MainContainer"
+    mainContainer.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    mainContainer.BorderSizePixel = 0
+    mainContainer.Size = UDim2.new(0, 300, 0, 450)
+    mainContainer.Position = UDim2.new(1, -20, 0.5, -225)
+    mainContainer.Parent = screenGui
+    
+    -- 코너 효과
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 15)
+    corner.Parent = mainContainer
+    
+    -- 그림자 효과
+    local shadow = Instance.new("UIStroke")
+    shadow.Color = Color3.fromRGB(0, 150, 255)
+    shadow.Thickness = 2
+    shadow.Parent = mainContainer
+    
+    -- 헤더
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+    header.BorderSizePixel = 0
+    header.Size = UDim2.new(1, 0, 0, 50)
+    header.Parent = mainContainer
+    
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 15)
+    headerCorner.Parent = header
+    
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Text = "📬 메일박스"
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 20
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.BackgroundTransparency = 1
+    title.Size = UDim2.new(1, -40, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.Parent = header
+    
+    -- 닫기 버튼
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Name = "CloseBtn"
+    closeBtn.Text = "✕"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 18
+    closeBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+    closeBtn.BackgroundTransparency = 0.7
+    closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    closeBtn.BorderSizePixel = 0
+    closeBtn.Size = UDim2.new(0, 35, 0, 35)
+    closeBtn.Position = UDim2.new(1, -40, 0, 7)
+    closeBtn.Parent = header
+    
+    local closeBtnCorner = Instance.new("UICorner")
+    closeBtnCorner.CornerRadius = UDim.new(0, 8)
+    closeBtnCorner.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        GUI_STATE.isVisible = false
+        mainContainer:TweenSize(UDim2.new(0, 0, 0, 450), "Out", "Quad", 0.3, true)
+        task.wait(0.3)
+        mainContainer.Visible = false
+    end)
+    
+    -- 상태 메시지
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Text = GUI_STATE.statusMessage
+    statusLabel.Font = Enum.Font.GothamSemibold
+    statusLabel.TextSize = 13
+    statusLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+    statusLabel.BackgroundColor3 = Color3.fromRGB(30, 40, 50)
+    statusLabel.BorderSizePixel = 0
+    statusLabel.TextScaled = false
+    statusLabel.TextWrapped = true
+    statusLabel.Size = UDim2.new(1, -20, 0, 35)
+    statusLabel.Position = UDim2.new(0, 10, 0, 60)
+    statusLabel.Parent = mainContainer
+    
+    local statusCorner = Instance.new("UICorner")
+    statusCorner.CornerRadius = UDim.new(0, 10)
+    statusCorner.Parent = statusLabel
+    
+    -- 컨텐츠 스크롤
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "ScrollFrame"
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.Size = UDim2.new(1, -20, 0, 270)
+    scrollFrame.Position = UDim2.new(0, 10, 0, 105)
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrollFrame.ScrollBarThickness = 6
+    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 150, 255)
+    scrollFrame.Parent = mainContainer
+    
+    -- 설정 섹션
+    local configLabel = Instance.new("TextLabel")
+    configLabel.Name = "ConfigLabel"
+    configLabel.Text = "⚙️ 설정"
+    configLabel.Font = Enum.Font.GothamBold
+    configLabel.TextSize = 14
+    configLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    configLabel.BackgroundTransparency = 1
+    configLabel.TextXAlignment = Enum.TextXAlignment.Left
+    configLabel.Size = UDim2.new(1, -20, 0, 25)
+    configLabel.Position = UDim2.new(0, 10, 0, 0)
+    configLabel.Parent = scrollFrame
+    
+    -- 받는 사람 입력
+    local usernameLabel = Instance.new("TextLabel")
+    usernameLabel.Name = "UsernameLabel"
+    usernameLabel.Text = "받는 사람:"
+    usernameLabel.Font = Enum.Font.GothamSemibold
+    usernameLabel.TextSize = 12
+    usernameLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    usernameLabel.BackgroundTransparency = 1
+    usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+    usernameLabel.Size = UDim2.new(1, -20, 0, 20)
+    usernameLabel.Position = UDim2.new(0, 10, 0, 30)
+    usernameLabel.Parent = scrollFrame
+    
+    local usernameInput = Instance.new("TextBox")
+    usernameInput.Name = "UsernameInput"
+    usernameInput.Text = C.MAIL_USERNAME and C.MAIL_USERNAME[1] or ""
+    usernameInput.Font = Enum.Font.Gotham
+    usernameInput.TextSize = 12
+    usernameInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    usernameInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    usernameInput.PlaceholderText = "플레이어명 입력"
+    usernameInput.BackgroundColor3 = Color3.fromRGB(40, 50, 60)
+    usernameInput.BorderSizePixel = 0
+    usernameInput.Size = UDim2.new(1, -20, 0, 30)
+    usernameInput.Position = UDim2.new(0, 10, 0, 50)
+    usernameInput.Parent = scrollFrame
+    
+    local usernameCorner = Instance.new("UICorner")
+    usernameCorner.CornerRadius = UDim.new(0, 8)
+    usernameCorner.Parent = usernameInput
+    
+    -- 메모
+    local noteLabel = Instance.new("TextLabel")
+    noteLabel.Name = "NoteLabel"
+    noteLabel.Text = "메모:"
+    noteLabel.Font = Enum.Font.GothamSemibold
+    noteLabel.TextSize = 12
+    noteLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    noteLabel.BackgroundTransparency = 1
+    noteLabel.TextXAlignment = Enum.TextXAlignment.Left
+    noteLabel.Size = UDim2.new(1, -20, 0, 20)
+    noteLabel.Position = UDim2.new(0, 10, 0, 90)
+    noteLabel.Parent = scrollFrame
+    
+    local noteInput = Instance.new("TextBox")
+    noteInput.Name = "NoteInput"
+    noteInput.Text = C.MAIL_NOTE or ""
+    noteInput.Font = Enum.Font.Gotham
+    noteInput.TextSize = 12
+    noteInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    noteInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
+    noteInput.PlaceholderText = "전송 메모 입력"
+    noteInput.BackgroundColor3 = Color3.fromRGB(40, 50, 60)
+    noteInput.BorderSizePixel = 0
+    noteInput.Size = UDim2.new(1, -20, 0, 50)
+    noteInput.Position = UDim2.new(0, 10, 0, 110)
+    noteInput.TextWrapped = true
+    noteInput.TextYAlignment = Enum.TextYAlignment.Top
+    noteInput.Parent = scrollFrame
+    
+    local noteCorner = Instance.new("UICorner")
+    noteCorner.CornerRadius = UDim.new(0, 8)
+    noteCorner.Parent = noteInput
+    
+    -- 아이템 섹션
+    local itemLabel = Instance.new("TextLabel")
+    itemLabel.Name = "ItemLabel"
+    itemLabel.Text = "📦 보낼 아이템"
+    itemLabel.Font = Enum.Font.GothamBold
+    itemLabel.TextSize = 14
+    itemLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    itemLabel.BackgroundTransparency = 1
+    itemLabel.TextXAlignment = Enum.TextXAlignment.Left
+    itemLabel.Size = UDim2.new(1, -20, 0, 25)
+    itemLabel.Position = UDim2.new(0, 10, 0, 170)
+    itemLabel.Parent = scrollFrame
+    
+    -- 아이템 입력 (간단 버전)
+    local itemCountLabel = Instance.new("TextLabel")
+    itemCountLabel.Name = "ItemCountLabel"
+    itemCountLabel.Text = "Super Watering Can: 2000"
+    itemCountLabel.Font = Enum.Font.Gotham
+    itemCountLabel.TextSize = 11
+    itemCountLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+    itemCountLabel.BackgroundColor3 = Color3.fromRGB(40, 50, 60)
+    itemCountLabel.BorderSizePixel = 0
+    itemCountLabel.Size = UDim2.new(1, -20, 0, 30)
+    itemCountLabel.Position = UDim2.new(0, 10, 0, 200)
+    itemCountLabel.Parent = scrollFrame
+    
+    local itemCountCorner = Instance.new("UICorner")
+    itemCountCorner.CornerRadius = UDim.new(0, 8)
+    itemCountCorner.Parent = itemCountLabel
+    
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 260)
+    
+    -- 하단 버튼들
+    local buttonContainer = Instance.new("Frame")
+    buttonContainer.Name = "ButtonContainer"
+    buttonContainer.BackgroundTransparency = 1
+    buttonContainer.BorderSizePixel = 0
+    buttonContainer.Size = UDim2.new(1, -20, 0, 80)
+    buttonContainer.Position = UDim2.new(0, 10, 1, -90)
+    buttonContainer.Parent = mainContainer
+    
+    -- 한 번 전송 버튼
+    local sendBtn = Instance.new("TextButton")
+    sendBtn.Name = "SendBtn"
+    sendBtn.Text = "🚀 지금 전송"
+    sendBtn.Font = Enum.Font.GothamBold
+    sendBtn.TextSize = 14
+    sendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    sendBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 100)
+    sendBtn.BorderSizePixel = 0
+    sendBtn.Size = UDim2.new(0.5, -5, 0, 35)
+    sendBtn.Position = UDim2.new(0, 0, 0, 0)
+    sendBtn.Parent = buttonContainer
+    
+    local sendBtnCorner = Instance.new("UICorner")
+    sendBtnCorner.CornerRadius = UDim.new(0, 10)
+    sendBtnCorner.Parent = sendBtn
+    
+    sendBtn.MouseButton1Click:Connect(function()
+        GUI_STATE.statusMessage = "⏳ 전송 중..."
+        if statusLabel and statusLabel.Parent then
+            statusLabel.Text = GUI_STATE.statusMessage
+        end
+        
+        -- 설정 업데이트
+        if usernameInput.Text ~= "" then
+            C.MAIL_USERNAME = { usernameInput.Text }
+        end
+        C.MAIL_NOTE = noteInput.Text
+        
+        task.spawn(function()
+            pcall(getgenv().mailboxSendOnce)
+            task.wait(1)
+            if statusLabel and statusLabel.Parent then
+                statusLabel.Text = GUI_STATE.statusMessage
+            end
+        end)
+    end)
+    
+    -- 자동 전송 토글
+    local autoBtn = Instance.new("TextButton")
+    autoBtn.Name = "AutoBtn"
+    autoBtn.Text = GUI_STATE.autoSendActive and "⏹️ 자동중" or "▶️ 자동전송"
+    autoBtn.Font = Enum.Font.GothamBold
+    autoBtn.TextSize = 14
+    autoBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    autoBtn.BackgroundColor3 = GUI_STATE.autoSendActive and Color3.fromRGB(150, 100, 0) or Color3.fromRGB(100, 100, 150)
+    autoBtn.BorderSizePixel = 0
+    autoBtn.Size = UDim2.new(0.5, -5, 0, 35)
+    autoBtn.Position = UDim2.new(0.5, 5, 0, 0)
+    autoBtn.Parent = buttonContainer
+    
+    local autoBtnCorner = Instance.new("UICorner")
+    autoBtnCorner.CornerRadius = UDim.new(0, 10)
+    autoBtnCorner.Parent = autoBtn
+    
+    autoBtn.MouseButton1Click:Connect(function()
+        GUI_STATE.autoSendActive = not GUI_STATE.autoSendActive
+        C.AUTO_SEND = GUI_STATE.autoSendActive
+        autoBtn.Text = GUI_STATE.autoSendActive and "⏹️ 자동중" or "▶️ 자동전송"
+        autoBtn.BackgroundColor3 = GUI_STATE.autoSendActive and Color3.fromRGB(150, 100, 0) or Color3.fromRGB(100, 100, 150)
+        
+        -- 설정 업데이트
+        if usernameInput.Text ~= "" then
+            C.MAIL_USERNAME = { usernameInput.Text }
+        end
+        C.MAIL_NOTE = noteInput.Text
+        
+        if GUI_STATE.autoSendActive then
+            GUI_STATE.statusMessage = "✅ 자동 전송 시작"
+            if statusLabel and statusLabel.Parent then
+                statusLabel.Text = GUI_STATE.statusMessage
+            end
+            task.spawn(function()
+                while GUI_STATE.autoSendActive and mainContainer.Parent do
+                    pcall(getgenv().mailboxSendOnce)
+                    task.wait(tonumber(C.SEND_INTERVAL) or 10)
                 end
             end)
+        else
+            GUI_STATE.statusMessage = "⏹️ 자동 전송 중지"
+            if statusLabel and statusLabel.Parent then
+                statusLabel.Text = GUI_STATE.statusMessage
+            end
         end
     end)
+    
+    -- 열기/닫기 버튼 (우측 하단)
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleBtn"
+    toggleBtn.Text = "📬"
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 24
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Size = UDim2.new(0, 50, 0, 50)
+    toggleBtn.Position = UDim2.new(1, -70, 1, -70)
+    toggleBtn.Parent = screenGui
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 12)
+    toggleCorner.Parent = toggleBtn
+    
+    toggleBtn.MouseButton1Click:Connect(function()
+        if GUI_STATE.isVisible then
+            GUI_STATE.isVisible = false
+            mainContainer:TweenSize(UDim2.new(0, 0, 0, 450), "Out", "Quad", 0.3, true)
+            task.wait(0.3)
+            mainContainer.Visible = false
+        else
+            GUI_STATE.isVisible = true
+            mainContainer.Visible = true
+            mainContainer:TweenSize(UDim2.new(0, 300, 0, 450), "Out", "Quad", 0.3, true)
+        end
+    end)
+    
+    -- 키보드 단축키
+    UIS.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode.M then
+            if GUI_STATE.isVisible then
+                GUI_STATE.isVisible = false
+                if mainContainer and mainContainer.Parent then
+                    mainContainer:TweenSize(UDim2.new(0, 0, 0, 450), "Out", "Quad", 0.3, true)
+                    task.wait(0.3)
+                    mainContainer.Visible = false
+                end
+            else
+                GUI_STATE.isVisible = true
+                if mainContainer and mainContainer.Parent then
+                    mainContainer.Visible = true
+                    mainContainer:TweenSize(UDim2.new(0, 300, 0, 450), "Out", "Quad", 0.3, true)
+                end
+            end
+        end
+    end)
+    
+    -- 상태 업데이트 루프
+    task.spawn(function()
+        while mainContainer and mainContainer.Parent do
+            task.wait(0.5)
+            if statusLabel and statusLabel.Parent then
+                statusLabel.Text = GUI_STATE.statusMessage
+            end
+        end
+    end)
+    
+    print("[Mailbox GUI] 로드 완료! M키로 열고 닫을 수 있습니다.")
+end
 
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            local newPos = startAbsPos + delta
-            MainFrame.Position = UDim2.new(0, math.clamp(newPos.X, 0, math.max(0, workspace.CurrentCamera.ViewportSize.X - MainFrame.AbsoluteSize.X)), 0, math.clamp(newPos.Y, 0, math.max(0, workspace.CurrentCamera.ViewportSize.Y - MainFrame.AbsoluteSize.Y)))
+-- GUI 생성
+local guiSuccess = pcall(createGUI)
+if not guiSuccess then
+    warn("[Mailbox] GUI 생성 실패")
+end
+
+-- 자동 전송 초기화
+if C.AUTO_SEND ~= false then
+    GUI_STATE.autoSendActive = true
+    task.spawn(function()
+        while true do
+            pcall(getgenv().mailboxSendOnce)
+            task.wait(tonumber(C.SEND_INTERVAL) or 10)
         end
     end)
 end
-
--- PromptInput이 포커스될 때 키보드에 가려지지 않도록 자동 위치 보정
-local function movePromptAboveKeyboard()
-    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1080, 1920)
-    local targetYpx = math.clamp(vp.Y * 0.12, 20, vp.Y * 0.45) -- 화면 높이의 12% ~ 45% 사이로 조정
-    TweenService:Create(PromptFrame, TweenInfo.new(0.18), {Position = UDim2.new(0.5, 0, 0, targetYpx)}):Play()
-end
-local function restorePromptPosition()
-    TweenService:Create(PromptFrame, TweenInfo.new(0.18), {Position = originalPromptPos}):Play()
-end
-
-PromptInput.Focused:Connect(function()
-    movePromptAboveKeyboard()
-end)
-PromptInput.FocusLost:Connect(function()
-    restorePromptPosition()
-end)
-
--- 초기 동기화
-task.spawn(function()
-    appendLog("인벤토리 카탈로그 동기화 중...", false)
-    for i = 1, 20 do
-        if getInventory() then break end
-        task.wait(0.5)
-    end
-    refreshCatalogUi()
-    appendLog("수량 지정 일괄 선택 모듈 준비 완료!", false)
-end)
